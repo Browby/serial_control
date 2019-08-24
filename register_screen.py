@@ -1,9 +1,16 @@
-from tkinter import Tk, Text, Scrollbar, Button, Label, Frame,LEFT,NONE, Entry
+from tkinter import Tk, Text, Scrollbar, Button, Label, Frame, RIGHT, LEFT, BOTTOM, TOP, NONE, BOTH, Entry
 from tkinter.constants import INSERT
 import serial
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 root = Tk()
 root.wm_title("Console tool")
+user_interface = Frame(root)
+user_interface.pack(side = LEFT)
+visuals = Frame(root)
+visuals.pack(side = RIGHT)
+content_text = Text(user_interface, wrap='word')
 
 #Taak starten die gaat lezen - eventueel syncrhonizeren om conflict met write te vermijde
 
@@ -39,12 +46,11 @@ class Transformation:
 
 NO_TRANSFORMATION = Transformation()
 
-content_text = Text(root, wrap='word')
 
 class SerialCommander:
     
     def __init__(self):
-        self.ser = serial.Serial(port="/dev/ttyACM0",
+        self.ser = serial.Serial(#port="/dev/ttyACM0",
                                   baudrate=115200,
                                   bytesize=serial.EIGHTBITS,
                                   parity=serial.PARITY_NONE,
@@ -228,21 +234,27 @@ addReg(RegisterEditor(0x13,"Sr"
                 ,description = "setpoint for RPM"))#    -30000 to 30000        value * 1
 
 for reg in registers.values():
-    frame = Frame(root)
+    frame = Frame(user_interface)
     reg.draw(frame)
     frame.pack()
 
 def restoreDefaults():
     serialCommander.writeCommand("r")
 
-Button(root,text = "restore defaults",command = restoreDefaults).pack()
-
+Button(user_interface,text = "restore defaults",command = restoreDefaults).pack(side=BOTTOM)
 
 content_text.pack(expand='yes', fill='both')
 scroll_bar = Scrollbar(content_text)
 content_text.configure(yscrollcommand=scroll_bar.set)
 scroll_bar.config(command=content_text.yview)
 scroll_bar.pack(side='right', fill='y')
+
+figure1 = plt.Figure(figsize=(6,5), dpi = 100)
+ax1 = figure1.add_subplot(111)
+scatter = FigureCanvasTkAgg(figure1, visuals)
+scatter.get_tk_widget().pack(side=LEFT, fill=BOTH)
+ax1.set_xlabel('Some x label')
+ax1.set_ylabel('Some y label')
 
 root.mainloop()
 
