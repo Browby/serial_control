@@ -6,11 +6,17 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from threading import Thread, Lock
 import logging
 import time
+import numpy as np
 
 logging.basicConfig(level=logging.DEBUG, format='%(message)s',)
 
+#def threadCallback(*args):
+#    logging.debug("Generated our own event")
+
+
 root = Tk()
 root.wm_title("Console tool")
+#root.bind("<<GeneratePlots>>", threadCallback)
 user_interface = Frame(root)
 user_interface.pack(side = LEFT)
 visuals = Frame(root)
@@ -51,6 +57,48 @@ class Transformation:
 
 NO_TRANSFORMATION = Transformation()
 
+class Data:
+    """
+    Class that abstract the binary storage approach. If one used for writing data to, the other is 
+    used to read data from. If the first is full, a switch is made between the two.
+    """
+    def __init__(self, size=(200, 17)):
+        self.buffer1 = np.empty(size)
+        self.buffer2 = np.empty(size)
+        self.validToRead1 = False
+        self.__buffer_index = 0
+        self.__buffer_index_max = size[0]
+
+    def __generateEvent():
+        """
+        Terrible use of global data.
+        """
+        root.event_generate("<<GeneratePlots>>", when="tail")
+    
+    def push_row(self, array):
+        """
+        Push an row of data onto the available buffer
+        """
+        if validToRead1:
+            buffer2[self.__buffer_index, :] = array
+        else:
+            buffer1[self.__buffer_index, :] = array
+        self.__buffer_index += 1
+
+        if self.__buffer_index == self.__buffer_index_max:
+            self.validToRead1 = not self.validToRead1
+            self.__buffer_index = 0
+            __generateEvent()
+
+    def flush(self):
+        """
+        Return the valid buffer for further user
+        """
+        if validToRead1:
+            return self.buffer1
+        else return self.buffer2
+
+
 class ThreadMessage:
     """
     Class supports safe exchange of data between multiple threads.
@@ -60,9 +108,9 @@ class ThreadMessage:
         self.write_message = ""
         self.new_message = False
         self.halt_thread = False
+        self.data = Data()
 
     def write(self, message):
-        logging.debug('Waiting to acquire lock')
         self.lock.acquire(True)
         try:
             logging.debug('Acquired lock')
@@ -76,10 +124,19 @@ class ThreadMessage:
         with self.lock:
             self.new_message = not self.new_message
 
+    def writeBuffer(self, array):
+        #NOTE: is lock necessary?
+        with self.lock:
+            self.data.push_row(array)
+
+    def readBuffer(self):
+        #NOTE: is lock necessary?
+        with self.lock:
+            return self.data.flush()
+
 class SerialCommandConsumer:
     """
-    Class that handles a single instance of a ThreadMessage in the second thread. 
-
+    Class that handles a single instance of a ThreadMessage in the second thread.
     """
     def __init__(self):
         pass
@@ -96,9 +153,13 @@ class SerialCommandConsumer:
         if isinstance(threadMessage, ThreadMessage):
             while not threadMessage.halt_thread:
                 if not threadMessage.new_message:
+                    line = serialConnection.readline()
+                    dummy = [item.decode() for item in line.split(",")]
+                    threadMessage.writeBuffer(dummy)
                     continue
                 else:
                     logging.info('new message')
+                    #root.event_generate("<<GeneratePlots>>", when="tail")
                     #serialConnection.write(threadMessage.write_message)
                     threadMessage.toggle_new_message()
                 time.sleep(0.05)
@@ -314,6 +375,27 @@ content_text.configure(yscrollcommand=scroll_bar.set)
 scroll_bar.config(command=content_text.yview)
 scroll_bar.pack(side='right', fill='y')
 
+class FigureCompositor:
+    def __init__(self, container, columns, transfomations, xlabel='', ylabel='', legend=False, figsize=(4,4), dpi=100, side=LEFT, fill=BOTH):
+        if isinstance(columns, list) and isinstance(transformations) and len(transformations) == len(columns):
+            self.columns = columns
+            self.transformations = transformations
+        self.figure = plt.Figure(figsize=figsize=, dpi=dpi)
+        self.ax = self.figure.add_subplot(111)
+        if isinstance(xlabel, str):
+            self.ax.set_xlabel(xlabel)
+        if isinstance(ylabel, str):
+            self.ax.set_ylabel(ylabel)
+        if legend:
+            self.ax.legend()
+        self.plot = FigureCanvasTkAgg(self.figure, self.parent)
+        self.plot.get_tk_widget().pack(side=side, fill=fill)
+
+    def draw(self, data):
+        for column in colums:
+            self.ax.scatter(range(0, data.shape()[0]], data[:, column])
+
+
 figure1 = plt.Figure(figsize=(6,5), dpi = 100)
 ax1 = figure1.add_subplot(111)
 scatter = FigureCanvasTkAgg(figure1, visuals)
@@ -322,7 +404,7 @@ ax1.set_xlabel('Some x label')
 ax1.set_ylabel('Some y label')
 
 if __name__ == '__main__':
-    serialThread = Thread(target=SerialCommandConsumer(), args=(threadMessage,))
+    serialThread = Thread(target=SerialCommandConsumer(), name='serialCommander', args=(threadMessage,))
     serialThread.start()
     root.mainloop()
     threadMessage.halt_thread = True
