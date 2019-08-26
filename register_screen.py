@@ -3,6 +3,11 @@ from tkinter.constants import INSERT
 import serial
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from threading import Thread, Lock
+import logging
+import time
+
+logging.basicConfig(level=logging.DEBUG, format='%(message)s',)
 
 root = Tk()
 root.wm_title("Console tool")
@@ -46,6 +51,25 @@ class Transformation:
 
 NO_TRANSFORMATION = Transformation()
 
+class ThreadMessage:
+    """
+    """
+    def __init__(self):
+        self.lock = Lock()
+        self.write_message = ""
+        self.new_message = False
+
+    def write(self, message):
+        logging.debug('Waiting to acquire lock')
+        self.lock.acquire(True)
+        try:
+            logging.debug('Acquired lock')
+            logging.debug('Message: ' + message)
+            self.write_message = message
+            self.new_message = True
+        finally:
+            self.lock.release()
+            logging.debug('Released a lock')
 
 class SerialCommander:
     
@@ -243,6 +267,11 @@ def restoreDefaults():
 
 Button(user_interface,text = "restore defaults",command = restoreDefaults).pack(side=BOTTOM)
 
+def testThreadFunction(threadMessage, message):
+    threadMessage.write(message)
+
+Button(user_interface,text = "Test thread",command = lambda: testThreadFunction(threadMessage, message)).pack(side=BOTTOM)
+
 content_text.pack(expand='yes', fill='both')
 scroll_bar = Scrollbar(content_text)
 content_text.configure(yscrollcommand=scroll_bar.set)
@@ -256,5 +285,7 @@ scatter.get_tk_widget().pack(side=LEFT, fill=BOTH)
 ax1.set_xlabel('Some x label')
 ax1.set_ylabel('Some y label')
 
-root.mainloop()
-
+if __name__ == '__main__':
+    message = "dummy message"
+    threadMessage = ThreadMessage()
+    root.mainloop()
