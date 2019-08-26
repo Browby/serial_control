@@ -53,50 +53,91 @@ NO_TRANSFORMATION = Transformation()
 
 class ThreadMessage:
     """
+    Class supports safe exchange of data between multiple threads.
     """
     def __init__(self):
         self.lock = Lock()
         self.write_message = ""
         self.new_message = False
+        self.halt_thread = False
 
     def write(self, message):
         logging.debug('Waiting to acquire lock')
         self.lock.acquire(True)
         try:
             logging.debug('Acquired lock')
-            logging.debug('Message: ' + message)
             self.write_message = message
             self.new_message = True
         finally:
             self.lock.release()
             logging.debug('Released a lock')
 
+    def toggle_new_message(self):
+        with self.lock:
+            self.new_message = not self.new_message
+
+class SerialCommandConsumer:
+    """
+    Class that handles a single instance of a ThreadMessage in the second thread. 
+
+    """
+    def __init__(self):
+        pass
+
+    def __call__(self, threadMessage=None):
+        serialConnection = serial.Serial(#port="/dev/ttyACM0",
+                                baudrate=115200,
+                                bytesize=serial.EIGHTBITS,
+                                parity=serial.PARITY_NONE,
+                                stopbits=serial.STOPBITS_ONE,
+                                timeout=1,
+                                xonxoff=0,
+                                rtscts=0)
+        if isinstance(threadMessage, ThreadMessage):
+            while not threadMessage.halt_thread:
+                if not threadMessage.new_message:
+                    continue
+                else:
+                    logging.info('new message')
+                    #serialConnection.write(threadMessage.write_message)
+                    threadMessage.toggle_new_message()
+                time.sleep(0.05)
+            else:
+                logging.info('Received halt condition')
+
+
+class SerialCommandProducer:
+    """
+    Class that handles a single instance of a ThreadMessage in the primary thread.
+    """
+
+    def __init__(self, threadMessage=None):
+        self.threadMessage=threadMessage
+
+    def write(self, command):
+        threadMessage.write(command)
+    
+
 class SerialCommander:
     
-    def __init__(self):
-        self.ser = serial.Serial(#port="/dev/ttyACM0",
-                                  baudrate=115200,
-                                  bytesize=serial.EIGHTBITS,
-                                  parity=serial.PARITY_NONE,
-                                  stopbits=serial.STOPBITS_ONE,
-                                  timeout=1,
-                                  xonxoff=0,
-                                  rtscts=0)
+    def __init__(self, threadProducer=None):
+        self.threadProducer = threadProducer
 
     def logCommand(self,command):
         content_text.insert(INSERT, "[COMMAND SEND]: " +  command + "\n")
 
     def writeCommand(self,command):
         self.logCommand(command)
-        self.ser.write(command.encode())
+        self.threadProducer.write(command.encode())
     
     def read(self):
         pass
         
     def write(self):
         pass
-    
-serialCommander = SerialCommander()
+
+threadMessage = ThreadMessage() #used as a global
+serialCommander = SerialCommander(SerialCommandProducer(threadMessage))
 
 class RegisterEditor:
     def __init__(self,registerId, identification, 
@@ -267,11 +308,6 @@ def restoreDefaults():
 
 Button(user_interface,text = "restore defaults",command = restoreDefaults).pack(side=BOTTOM)
 
-def testThreadFunction(threadMessage, message):
-    threadMessage.write(message)
-
-Button(user_interface,text = "Test thread",command = lambda: testThreadFunction(threadMessage, message)).pack(side=BOTTOM)
-
 content_text.pack(expand='yes', fill='both')
 scroll_bar = Scrollbar(content_text)
 content_text.configure(yscrollcommand=scroll_bar.set)
@@ -286,6 +322,8 @@ ax1.set_xlabel('Some x label')
 ax1.set_ylabel('Some y label')
 
 if __name__ == '__main__':
-    message = "dummy message"
-    threadMessage = ThreadMessage()
+    serialThread = Thread(target=SerialCommandConsumer(), args=(threadMessage,))
+    serialThread.start()
     root.mainloop()
+    threadMessage.halt_thread = True
+    serialThread.join()
