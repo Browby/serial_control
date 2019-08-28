@@ -1,4 +1,4 @@
-from scipy.signal import butter, lfilter
+from scipy.signal import butter, lfilter, lfilter_zi
 
 class Filter:
     def __init__(self, cutOff, fs, order=3):
@@ -24,6 +24,7 @@ class Filter:
     def butter_lowpass_filter(self, data):
         """
         Implements digital butterworth lowpass filter.
+        Assumes 1-D array_like type.
         """
-        y = lfilter(self.b, self.a, data)
+        y = lfilter(self.b, self.a, data, zi=lfilter_zi(b, a)*data[0])[0]
         return y
