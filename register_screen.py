@@ -1,4 +1,4 @@
-from tkinter import Tk, Text, Scrollbar, Button, Label, Frame, RIGHT, LEFT, BOTTOM, TOP, NONE, BOTH, Entry
+from tkinter import Tk, Text, Scrollbar, Button, Label, Frame, RIGHT, LEFT, X, BOTTOM, TOP, NONE, BOTH, Entry, StringVar
 from tkinter.constants import INSERT
 import serial
 import matplotlib.pyplot as plt
@@ -7,23 +7,25 @@ from threading import Thread, Lock
 import logging
 import time
 import numpy as np
+from filtering import Filter
 
 logging.basicConfig(level=logging.DEBUG, format='%(message)s',)
 
-#def threadCallback(*args):
-#    logging.debug("Generated our own event")
-
-
 root = Tk()
 root.wm_title("Console tool")
-#root.bind("<<GeneratePlots>>", threadCallback)
 user_interface = Frame(root)
 user_interface.pack(side = LEFT)
 visuals = Frame(root)
 visuals.pack(side = RIGHT)
-content_text = Text(user_interface, wrap='word')
 
-#Taak starten die gaat lezen - eventueel syncrhonizeren om conflict met write te vermijde
+upper_visuals = Frame(visuals)
+upper_visuals.pack(side=TOP)
+lower_visuals = Frame(visuals)
+lower_visuals.pack(side=TOP)
+bottom_displays = Frame(visuals)
+bottom_displays.pack(side=TOP)
+
+content_text = Text(user_interface, wrap='word')
 
 def UNLIMITED(val):
     return True
@@ -62,7 +64,7 @@ class Data:
     Class that abstract the binary storage approach. If one used for writing data to, the other is 
     used to read data from. If the first is full, a switch is made between the two.
     """
-    def __init__(self, size=(100, 18)):
+    def __init__(self, size=(300, 18)):
         self.buffer1 = np.empty(size)
         self.buffer2 = np.empty(size)
         self.validToRead1 = False
@@ -83,13 +85,13 @@ class Data:
             self.validToRead1 = not self.validToRead1
             self.__buffer_index = 0
             root.event_generate("<<GeneratePlots>>", when="tail")
-            logging.debug("buffer full")
+            #logging.debug("buffer full")
 
     def flush(self):
         """
         Return the valid buffer for further user
         """
-        if validToRead1:
+        if self.validToRead1:
             return self.buffer1
         else:
             return self.buffer2
@@ -109,12 +111,10 @@ class ThreadMessage:
     def write(self, message):
         self.lock.acquire(True)
         try:
-            logging.debug('Acquired lock')
             self.write_message = message
             self.new_message = True
         finally:
             self.lock.release()
-            logging.debug('Released a lock')
 
     def toggle_new_message(self):
         with self.lock:
@@ -138,7 +138,7 @@ class SerialCommandConsumer:
         pass
 
     def __call__(self, threadMessage=None):
-        serialConnection = serial.Serial(port="/dev/rfcomm0",
+        serialConnection = serial.Serial(port="/dev/rfcomm2",
                                 baudrate=115200,
                                 bytesize=serial.EIGHTBITS,
                                 parity=serial.PARITY_NONE,
@@ -161,11 +161,9 @@ class SerialCommandConsumer:
                     threadMessage.writeBuffer(dummy[1])
                     continue
                 else:
-                    logging.info('new message')
-                    #root.event_generate("<<GeneratePlots>>", when="tail")
-                    #serialConnection.write(threadMessage.write_message)
+                    serialConnection.write(threadMessage.write_message)
                     threadMessage.toggle_new_message()
-                time.sleep(0.005)
+                #time.sleep(0.005)
             else:
                 logging.info('Received halt condition')
 
@@ -500,69 +498,216 @@ for reg in registers.values():
     reg.draw(frame)
     frame.pack()
 
+class DisplayCompositor:
+    def __init__(self, parent
+            ,identification
+            ,column
+            ,formatType="{0}"
+            ,transformations=[]
+            ,side=LEFT
+            ,fill=X
+            ,**kwarfs):
+        self.identification = identification
+        self.column = column
+        self.formatType = formatType
+        self.transformations = transformations
+        self.var = StringVar()
+        self.frame = Frame(parent)
+        self.labelId = Label(self.frame, text=identification)
+        self.labelId.pack(side=LEFT)
+        self.labelData= Label(self.frame, textvariable=self.var)
+        self.labelData.pack(side=LEFT)
+        self.frame.pack(side=side, fill=X, padx=80)
+
+    def draw(self, data):
+        """
+        Fill the display with latest available value.
+        """
+        self.var.set(self.formatType.format(self.transformations(data[-1, self.column])))
+
+    def getDisId(self):
+        return self.identification
+
+    @staticmethod
+    def addDisplay(displays, newDisplay):
+        if newDisplay.getDisId() in displays.keys():
+            raise Exception("Double definition of display") 
+        else:
+            displays[newDisplay.getDisId()] = newDisplay
+            logging.debug("added display")
+        return newDisplay
+
+displays = {}
+DisplayCompositor.addDisplay(displays, DisplayCompositor(bottom_displays
+                            ,"MOSFETS temperature: "
+                            ,4
+                            ,formatType="{0:.1f} [degrees Celcius]"
+                            ,transformations=lambda x:float(x-1940)/3.853
+                            ))
+
+DisplayCompositor.addDisplay(displays, DisplayCompositor(bottom_displays
+                            ,"Errors: "
+                            ,14
+                            ,formatType="{0:b}"
+                            ,transformations=lambda x:int(x)
+                            ))
+
 class FigureCompositor:
     def __init__(self, parent
             ,identification
             ,columns
-            ,transfomations
-            ,xlabel=''
-            ,ylabel=''
+            ,ylabel = [""]
+            ,transformations=[]
+            ,cross=False
             ,legend=False
-            ,figsize=(4,4)
+            ,figsize=(9,3)
             ,dpi=100
             ,side=LEFT
-            ,fill=BOTH):
-        if isinstance(columns, list) and isinstance(transformations) and len(transformations) == len(columns):
+            ,fill=BOTH
+            ,**kwargs):
+        self.identification = identification
+        self.transformations = transformations
+        if isinstance(columns, list) and isinstance(transformations, list):
             self.columns = columns
-            self.transformations = transformations
+            if len(transformations) == 0:
+                for item in range(len(columns)):
+                    self.transformations.append(lambda x : x)
         self.figure = plt.Figure(figsize=figsize, dpi=dpi)
         self.ax = self.figure.add_subplot(111)
-        if isinstance(xlabel, str):
-            self.ax.set_xlabel(xlabel)
-        if isinstance(ylabel, str):
-            self.ax.set_ylabel(ylabel)
-        if legend:
-            self.ax.legend()
-        self.canvas = FigureCanvasTkAgg(self.figure, self.parent)
+        self.ylabel=ylabel
+        self.legend = legend
+        self.cross = cross
+
+        self.filter = None
+        self.ylimits = None
+        if kwargs is not None:
+            for key, value in kwargs.items():
+                if key == 'filters':
+                    self.filter = value
+                if key == 'ylimits':
+                    if isinstance(value, tuple) and len(value) == 2:
+                        self.ylimits = value
+
+        self.canvas = FigureCanvasTkAgg(self.figure, parent)
         self.canvas.get_tk_widget().pack(side=side, fill=fill)
-        self.canvas.show()
+        #self.canvas.draw()
 
     def draw(self, data):
+        """
+        Fill the figure with data.
+        """
         self.ax.clear()
-        for column in colums:
-            self.ax.scatter(range(0, data.shape()[0], data[:, column]))
+        x_items = list(range(0, data.shape[0]))
+
+        #Apply transformations and filtering
+        dummy = []
+        for counter, column in enumerate(self.columns):
+            dummy.append(list(map(self.transformations[counter], data[:, column])))
+            if self.filter is not None:
+                if isinstance(self.filter, list):
+                    try:
+                        self.filter[counter]
+                    except IndexError:
+                        continue
+                    dummy[counter] = self.filter[counter].butter_lowpass_filter(dummy[counter])
+
+        else:
+            if self.cross:
+                #FIXME: assumes just 2 columns
+                dummy.append([item[0]*item[1] for item in zip(dummy[0], dummy[1])])
+
+        for index in range(len(dummy)):
+            self.ax.plot(x_items, dummy[index])
+        else:
+            if self.legend:
+                self.ax.legend(self.ylabel)
+            self.ax.grid()
+            if self.ylimits is not None:
+                self.ax.set_ylim([self.ylimits[0], self.ylimits[1]])
+            self.ax.set_title(self.identification)
+            self.canvas.draw()
 
     def getFigId(self):
         return self.identification
 
-figures = {}
+    @staticmethod
+    def addFigure(figures, newFigure):
+        if newFigure.getFigId() in figures.keys():
+            raise Exception("Double definition of figure") 
+        else:
+            figures[newFigure.getFigId()] = newFigure
+        return newFigure
 
-def addFigure(newFigure):
-    if newFigure.getFigId() in figures.keys():
-        raise Exception("Double definition of register") 
-    else:
-        figures[newFigure.getRegId()] = newFigure
-    return newFigure
+
+figures = {}
+FigureCompositor.addFigure(figures, FigureCompositor(upper_visuals
+                           ,"current/voltage/power"
+                           ,[1,0]
+                           ,transformations=[lambda x: float(x - 2048)/40.95, lambda x: float(x/128.189)]
+                           ,ylabel=["current [A]", "voltage [V]", "power [W]"]
+                           ,legend=True
+                           ,cross=True
+                           ,filters=[Filter(3,150)]
+                           ))
+
+FigureCompositor.addFigure(figures, FigureCompositor(upper_visuals
+                           ,"thrust"
+                           ,[2]
+                           ,ylabel=["Thrust [kg]"]
+                           ,legend=True
+                           ))
+
+FigureCompositor.addFigure(figures, FigureCompositor(lower_visuals
+                          ,"current"
+                           ,[1,1]
+                           ,transformations=[lambda x: float(x - 2048)/40.95,lambda x: float(x - 2048)/40.95]
+                           ,ylabel=["filtered current [A]", "raw current[A]"]
+                           ,legend=True
+                           ,filters=[Filter(3, 150)]
+                           ,ylimits=(-1,1)
+                           ))
+
+FigureCompositor.addFigure(figures, FigureCompositor(lower_visuals
+                           ,"rpm"
+                           ,[3]
+                           ,ylabel=["rpm [1/min]"]
+                           ,legend=True
+                           ,ylimits=(0, 30000)
+                           ,))
+
+def visualsUpdateCallback(*args):
+    """
+    Uses 2 globals: figures map and threadMessage instance
+    """
+    for key, value in figures.items():
+        value.draw(threadMessage.readBuffer())
+    for key, value in displays.items():
+        value.draw(threadMessage.readBuffer())
+
+root.bind("<<GeneratePlots>>", visualsUpdateCallback)
 
 def restoreDefaults():
-    serialCommander.writeCommand("r")
+    serialCommander.writeCommand("R\n")
+
+def resetSystem():
+    serialCommander.writeCommand("X\n")
+
+def standbySystem():
+    serialCommander.writeCommand("Y\n")
+
+def armSystem():
+    serialCommander.writeCommand("Z\n")
 
 Button(user_interface,text = "restore defaults",command = restoreDefaults).pack(side=BOTTOM)
+Button(user_interface,text = "reset",command = resetSystem).pack(side=BOTTOM)
+Button(user_interface,text = "standby",command = standbySystem).pack(side=BOTTOM)
+Button(user_interface,text = "arm",command = armSystem).pack(side=BOTTOM)
 
 content_text.pack(expand='yes', fill='both')
 scroll_bar = Scrollbar(content_text)
 content_text.configure(yscrollcommand=scroll_bar.set)
 scroll_bar.config(command=content_text.yview)
 scroll_bar.pack(side='right', fill='y')
-
-
-
-#figure1 = plt.Figure(figsize=(6,5), dpi = 100)
-#ax1 = figure1.add_subplot(111)
-#jscatter = FigureCanvasTkAgg(figure1, visuals)
-#scatter.get_tk_widget().pack(side=LEFT, fill=BOTH)
-#ax1.set_xlabel('Some x label')
-#ax1.set_ylabel('Some y label')
 
 if __name__ == '__main__':
     serialThread = Thread(target=SerialCommandConsumer(), name='serialCommander', args=(threadMessage,))
