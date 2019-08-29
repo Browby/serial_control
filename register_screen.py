@@ -138,7 +138,7 @@ class SerialCommandConsumer:
         pass
 
     def __call__(self, threadMessage=None):
-        serialConnection = serial.Serial(port="/dev/rfcomm2",
+        serialConnection = serial.Serial(port="/dev/rfcomm3",
                                 baudrate=115200,
                                 bytesize=serial.EIGHTBITS,
                                 parity=serial.PARITY_NONE,
@@ -157,7 +157,7 @@ class SerialCommandConsumer:
                         # or if length is not correct
                         continue
                     
-                    #logging.debug(dummy[1])
+                    logging.debug(dummy[1])
                     threadMessage.writeBuffer(dummy[1])
                     continue
                 else:
@@ -653,7 +653,9 @@ FigureCompositor.addFigure(figures, FigureCompositor(upper_visuals
 FigureCompositor.addFigure(figures, FigureCompositor(upper_visuals
                            ,"thrust"
                            ,[2]
-                           ,ylabel=["Thrust [kg]"]
+                           ,ylabel=["Thrust [g]"]
+                           ,filters=[Filter(10,150)]
+                           ,ylimits=(0,1500)
                            ,legend=True
                            ))
 
